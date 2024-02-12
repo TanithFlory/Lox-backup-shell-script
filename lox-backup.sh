@@ -1,34 +1,29 @@
 source .env
+CREDENTIALS="$(cat credentials.json)"
+for entry in $(echo "$CREDENTIALS" | jq -c '.[]'); do
+	NAME=$(echo "$entry" | jq -r '.name')
+	SERIAL_NUMBER=$(echo "$entry" | jq -r '.serial_number')
+	USERNAME=$(echo "$entry" | jq -r '.username')
+	PASSWORD=$(echo "$entry" | jq -r '.password')
 
-NAME="MODO_SHOWROOM"
-USER=$MS_USERNAME
-PASSWORD=$MS_PASSWORD
-IP="192.168.1.245"
+	IP_HTTPS=$(curl "https://dns.loxonecloud.com/?getip&snr=${SERIAL_NUMBER}&json=true" | jq -r '.IPHTTPS')
+	IP=$(echo "$IP_HTTPS" | cut -d':' -f1 | tr '.' '-')
+	PORT=$(echo "$IP_HTTPS" | cut -d':' -f2)
 
-if [ ! -d "/miniserver-backups/$NAME" ]; then
-	mkdir "/miniserver-backups/$NAME"
+	echo "[$(date +'%a %b %d %T %Y')] Fetching backup from Loxone Cloud Server"
 
-fi
+	curl -O "https://${USERNAME}:${PASSWORD}@${IP}.${SERIAL_NUMBER}.dyndns.loxonecloud.com:${PORT}/dev/fsget/backup/sps_new.zip"
 
-cd "/miniserver-backups/$NAME"
+	if [ $? -ne 0 ]; then
+		echo "[$(date +'%a %b %d %T %Y')] Failed To Fetch From The Server]"
+		exit 1
+	fi
 
-echo "[$(date +'%a %b %d %T %Y')] Loxone Miniserver Backup Initiated"
+	echo "[$(date +'%a %b %d %T %Y')] Renaming File"
 
-wget --tries=2 -r -N -l inf -o wget.log ftp://$USER:$PASSWORD@$IP
+	FILE_NAME="${NAME}_$(date +'%m%d%Y_%H%M%S').zip"
 
-if [ $? -eq 0 ]; then
-
-	echo "[$(date +'%a %b %d %T %Y')] Backup Created Successfully, Location - $(pwd)"
-
-	echo "[$(date +'%a %b %d %T %Y')] Compressing The Backup."
-
-	FILE_NAME="${NAME}-$(date +'%m%d%Y').tar.gz"
-
-	tar czf "${FILE_NAME}" $IP/
-
-	rm -r "/miniserver-backups/${NAME}/$IP"
-
-	echo "[$(date +'%a %b %d %T %Y')] Compression Succesful."
+	mv "sps_new.zip" "${FILE_NAME}"
 
 	echo "[$(date +'%a %b %d %T %Y')] Initiating Upload To Google Drive"
 
@@ -38,28 +33,57 @@ if [ $? -eq 0 ]; then
 		--data-urlencode "client_id=$CLIENT_ID" \
 		--data-urlencode "client_secret=$CLIENT_SECRET" \
 		--data-urlencode "refresh_token=$REFRESH_TOKEN" \
-		--data-urlencode "redirect_uri=$REDIRECT_URI" | jq -r '.access_token' >/dev/null 2>&1)
+		--data-urlencode "redirect_uri=$REDIRECT_URI" | jq -r '.access_token')
+	if [ $? -ne 0 ]; then
+		echo "[$(date +'%a %b %d %T %Y')] Failed To Generate Access Token"
+		exit 1
+	fi
+
+	curl -X POST -L \
+		-H "Authorization: Bearer $ACCESS_TOKEN" \
+		-F "metadata={name:'${FILE_NAME}'};type=application/json;charset=UTF-9" \
+		-F "file=@/Lox-backup-shell-script/${FILE_NAME};type=application/x-tar" \
+		"https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart" >/dev/null 2>&1
 
 	if [ $? -eq 0 ]; then
-		echo "[$(date +'%a %b %d %T %Y')] Access Token Granted From Google Drive, Uploading Backup"
-
-		curl -X POST -L \
-			-H "Authorization: Bearer $ACCESS_TOKEN" \
-			-F "metadata={name:'${FILE_NAME}'};type=application/json;charset=UTF-9" \
-			-F "file=@/miniserver-backups/${NAME}/${FILE_NAME};type=application/x-tar" \
-			"https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart" >/dev/null 2>&1
-
-		if [ $? -eq 0 ]; then
-			echo "[$(date +'%a %b %d %T %Y')] Upload Successful"
-		else
-			echo "[$(date +'%a %b %d %T %Y')] Upload Failed"
-		fi
-
+		echo "[$(date +'%a %b %d %T %Y')] Upload Successful"
 	else
-		echo "Failed to generate Token."
+		echo "[$(date +'%a %b %d %T %Y')] Upload Failed"
 	fi
-else
 
-	echo "${DATE} Backup Failed."
-
-fi
+done
+# 		mkdir "/miniserver-backups/$NAME"
+#
+# 	fi
+#
+# 	cd "/miniserver-backups/$NAME"
+#
+# 	echo "[$(date +'%a %b %d %T %Y')] Loxone Miniserver Backup Initiated"
+#
+# 	wget --tries=2 -N -l inf -o wget.log ftp://$USER:$PASSWORD@$IP
+#
+# 	if [ $? -eq 00 ]; then
+# 			echo "[$(date +'%a %b %d %T %Y')] Access Token Granted From Google Drive, Uploading Backup"
+#
+# 			curl -X POST -L \
+# 				-H "Authorization: Bearer $ACCESS_TOKEN" \
+# 				-F "metadata={name:'${FILE_NAME}'};type=application/json;charset=UTF-9" \
+# 				-F "file=@/miniserver-backups/${NAME}/${FILE_NAME};type=application/x-tar" \
+# 				"https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart" >/dev/null 2>&1
+#
+# 			if [ $? -eq 0 ]; then
+# 				echo "[$(date +'%a %b %d %T %Y')] Upload Successful"
+# 			else
+# 				echo "[$(date +'%a %b %d %T %Y')] Upload Failed"
+# 			fi
+#
+# 		else
+# 			echo "Failed to generate Token."
+# 		fi
+# 	else
+#
+# 		echo "${DATE} Backup Failed."
+#
+# 	fi
+#
+# done
