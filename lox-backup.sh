@@ -6,20 +6,18 @@ for entry in $(echo "$CREDENTIALS" | jq -c '.[]'); do
 	USERNAME=$(echo "$entry" | jq -r '.username')
 	PASSWORD=$(echo "$entry" | jq -r '.password')
 
-	IP_HTTPS=$(curl "https://dns.loxonecloud.com/?getip&snr=${SERIAL_NUMBER}&json=true" | jq -r '.IPHTTPS')
+	IP_HTTPS=$(curl -sS "https://dns.loxonecloud.com/?getip&snr=${SERIAL_NUMBER}&json=true" | jq -r '.IPHTTPS')
 	IP=$(echo "$IP_HTTPS" | cut -d':' -f1 | tr '.' '-')
 	PORT=$(echo "$IP_HTTPS" | cut -d':' -f2)
 
 	echo "[$(date +'%a %b %d %T %Y')] Fetching backup from Loxone Cloud Server"
 
-	curl -O "https://${USERNAME}:${PASSWORD}@${IP}.${SERIAL_NUMBER}.dyndns.loxonecloud.com:${PORT}/dev/fsget/backup/sps_new.zip"
+	curl -sS -O "https://${USERNAME}:${PASSWORD}@${IP}.${SERIAL_NUMBER}.dyndns.loxonecloud.com:${PORT}/dev/fsget/backup/sps_new.zip"
 
 	if [ $? -ne 0 ]; then
-		echo "[$(date +'%a %b %d %T %Y')] Failed To Fetch From The Server]"
+		echo "[$(date +'%a %b %d %T %Y')] Failed To Fetch From The Server"
 		exit 1
 	fi
-
-	echo "[$(date +'%a %b %d %T %Y')] Renaming File"
 
 	FILE_NAME="${NAME}_$(date +'%m%d%Y_%H%M%S').zip"
 
@@ -27,7 +25,7 @@ for entry in $(echo "$CREDENTIALS" | jq -c '.[]'); do
 
 	echo "[$(date +'%a %b %d %T %Y')] Initiating Upload To Google Drive"
 
-	ACCESS_TOKEN=$(curl --location --request POST 'https://oauth2.googleapis.com/token' \
+	ACCESS_TOKEN=$(curl -sS --location --request POST 'https://oauth2.googleapis.com/token' \
 		--header 'Content-Type: application/x-www-form-urlencoded' \
 		--data-urlencode "grant_type=refresh_token" \
 		--data-urlencode "client_id=$CLIENT_ID" \
@@ -37,18 +35,20 @@ for entry in $(echo "$CREDENTIALS" | jq -c '.[]'); do
 	if [ $? -ne 0 ]; then
 		echo "[$(date +'%a %b %d %T %Y')] Failed To Generate Access Token"
 		exit 1
+		rm ${FILE_NAME}
 	fi
 
-	curl -X POST -L \
+	curl -sS -X POST -L \
 		-H "Authorization: Bearer $ACCESS_TOKEN" \
 		-F "metadata={name:'${FILE_NAME}'};type=application/json;charset=UTF-9" \
 		-F "file=@/Lox-backup-shell-script/${FILE_NAME};type=application/x-tar" \
 		"https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart" >/dev/null 2>&1
 
 	if [ $? -eq 0 ]; then
-		echo "[$(date +'%a %b %d %T %Y')] Upload Successful"
+		echo "$(tput setaf 2) $(date +'%a %b %d %T %Y')] Upload Successful $(tput sgr0)"
+		rm ${FILE_NAME}
 	else
-		echo "[$(date +'%a %b %d %T %Y')] Upload Failed"
+		echo "$(tput setaf 1) [$(date +'%a %b %d %T %Y')] Upload Failed $(tput sgr0)"
 	fi
 
 done
